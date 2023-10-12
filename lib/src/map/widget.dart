@@ -82,23 +82,25 @@ class FlutterMap extends StatefulWidget {
   State<FlutterMap> createState() => _FlutterMapStateContainer();
 }
 
-class _FlutterMapStateContainer extends State<FlutterMap>
-    with AutomaticKeepAliveClientMixin {
+class _FlutterMapStateContainer extends State<FlutterMap> with AutomaticKeepAliveClientMixin {
   bool _initialCameraFitApplied = false;
 
   late final FlutterMapInternalController _flutterMapInternalController;
   late MapControllerImpl _mapController;
   late bool _mapControllerCreatedInternally;
+  late BoxConstraints layoutConstraints;
 
   @override
   void initState() {
     super.initState();
-    _flutterMapInternalController =
-        FlutterMapInternalController(widget.options);
+    _flutterMapInternalController = FlutterMapInternalController(widget.options);
     _initializeAndLinkMapController();
 
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => widget.options.onMapReady?.call());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.options.onMapReady?.call();
+      // I have no idea why I have to use Future.delay. If not, map layers are not loaded
+      Future.delayed(Duration(microseconds: 1)).then((_) => _applyInitialCameraFit(layoutConstraints));
+    });
 
     if (kDebugMode && kIsWeb && !isCanvasKit) {
       Logger(printer: PrettyPrinter(methodCount: 0)).w(
@@ -129,8 +131,7 @@ class _FlutterMapStateContainer extends State<FlutterMap>
   }
 
   void _initializeAndLinkMapController() {
-    _mapController =
-        (widget.mapController ?? MapController()) as MapControllerImpl;
+    _mapController = (widget.mapController ?? MapController()) as MapControllerImpl;
     _mapControllerCreatedInternally = widget.mapController == null;
     _flutterMapInternalController.linkMapController(_mapController);
   }
@@ -142,7 +143,12 @@ class _FlutterMapStateContainer extends State<FlutterMap>
     return LayoutBuilder(
       builder: (context, constraints) {
         _updateAndEmitSizeIfConstraintsChanged(constraints);
-        _applyInitialCameraFit(constraints);
+
+        // It cannot be here, because it cousing late initialization error
+        // Moved to initState > addPostFrameCallback
+        // _applyInitialCameraFit(constraints);
+
+        layoutConstraints = constraints;
 
         return FlutterMapInteractiveViewer(
           controller: _flutterMapInternalController,
@@ -181,10 +187,7 @@ class _FlutterMapStateContainer extends State<FlutterMap>
     // If an initial camera fit was provided apply it to the map state once the
     // the parent constraints are available.
 
-    if (!_initialCameraFitApplied &&
-        (widget.options.bounds != null ||
-            widget.options.initialCameraFit != null) &&
-        _parentConstraintsAreSet(context, constraints)) {
+    if (!_initialCameraFitApplied && (widget.options.bounds != null || widget.options.initialCameraFit != null) && _parentConstraintsAreSet(context, constraints)) {
       _initialCameraFitApplied = true;
 
       final CameraFit cameraFit;
@@ -222,8 +225,7 @@ class _FlutterMapStateContainer extends State<FlutterMap>
       constraints.maxHeight,
     );
     final oldCamera = _flutterMapInternalController.camera;
-    if (_flutterMapInternalController
-        .setNonRotatedSizeWithoutEmittingEvent(nonRotatedSize)) {
+    if (_flutterMapInternalController.setNonRotatedSizeWithoutEmittingEvent(nonRotatedSize)) {
       final newMapCamera = _flutterMapInternalController.camera;
 
       // Avoid emitting the event during build otherwise if the user calls
@@ -245,9 +247,7 @@ class _FlutterMapStateContainer extends State<FlutterMap>
   /// in a subsequent build to the actual constraints. This check allows us to
   /// differentiate zero constraints caused by missing platform resolution vs
   /// zero constraints which were actually provided by the parent widget.
-  bool _parentConstraintsAreSet(
-          BuildContext context, BoxConstraints constraints) =>
-      constraints.maxWidth != 0 || MediaQuery.sizeOf(context) != Size.zero;
+  bool _parentConstraintsAreSet(BuildContext context, BoxConstraints constraints) => constraints.maxWidth != 0 || MediaQuery.sizeOf(context) != Size.zero;
 
   @override
   bool get wantKeepAlive => widget.options.keepAlive;
